@@ -8,7 +8,7 @@
     <div class="modal" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-label="Start a new game">
         <div class="modal-head">
             <h2>New game</h2>
-            <p>Pick an opponent. Ratings are approximate and set how deep each bot looks and how often it slips.</p>
+            <p>Pick an opponent. Engine bot ratings are approximate. Jev uses the local API host.</p>
         </div>
 
         <div class="modal-body">
@@ -23,6 +23,14 @@
                         </span>
                     </button>
                 }
+                <button class="bot-option @(ReferenceEquals(_bot, JevOpponent.Profile) ? "selected" : "")"
+                        disabled="@(!JevAvailable)" @onclick="() => _bot = JevOpponent.Profile">
+                    <span class="avatar" style="background:@JevOpponent.Profile.Accent">JV</span>
+                    <span class="bot-meta">
+                        <span class="bot-name">Jev</span>
+                        <span class="bot-style">@(JevAvailable ? JevOpponent.Profile.Style : "Start the local Jev host with JEV_API_KEY to enable.")</span>
+                    </span>
+                </button>
             </div>
 
             <div class="field">
@@ -76,6 +84,9 @@
 
     [Parameter]
     public bool CanCancel { get; set; } = true;
+
+    [Parameter]
+    public bool JevAvailable { get; set; }
 
     [Parameter]
     public EventCallback<(BotProfile Bot, Color Color, TimeControl Time)> OnStart { get; set; }

@@ -3,6 +3,7 @@ using Engine.Chess.Board;
 using Engine.Chess.Core;
 using Engine.Chess.Play;
 using Engine.Chess.Search;
+using System.Net.Http.Json;
 
 namespace Engine.UI.Services;
 
@@ -10,6 +11,7 @@ namespace Engine.UI.Services;
 public enum SessionState {
     AwaitingPlayer,
     BotThinking,
+    BotError,
     AwaitingPromotion,
     Finished,
     Reviewing,
@@ -44,6 +46,7 @@ public sealed class GameSession : IDisposable {
     private static readonly SearchLimits BarLimits = new() { MaxDepth = 7, MaxTimeMilliseconds = 140 };
 
     private readonly SearchEngine _analysis = new(16);
+    private readonly HttpClient _http;
     private readonly List<int> _evaluations = [];
     private readonly List<ReviewedMove> _reviewed = [];
 
@@ -54,7 +57,8 @@ public sealed class GameSession : IDisposable {
     private double _blackSecondsLeft;
     private bool _clockRunning;
 
-    public GameSession() {
+    public GameSession(HttpClient http) {
+        _http = http;
         Bot = BotProfile.Default;
         _bot = new ChessBot(Bot);
         Game = new ChessGame();
@@ -71,6 +75,21 @@ public sealed class GameSession : IDisposable {
     public ChessGame Game { get; private set; }
 
     public BotProfile Bot { get; private set; }
+
+    public bool JevAvailable { get; private set; }
+
+    public string? JevError { get; private set; }
+
+    public JevDecisionStats? LastJevDecision { get; private set; }
+
+    public async Task RefreshJevAvailabilityAsync() {
+        try {
+            JevStatus? status = await _http.GetFromJsonAsync<JevStatus>("api/jev/status");
+            JevAvailable = status?.Available == true;
+        } catch (HttpRequestException) { JevAvailable = false; }
+          catch (System.Text.Json.JsonException) { JevAvailable = false; }
+        Notify();
+    }
 
     public TimeControl TimeControl { get; private set; } = TimeControl.Unlimited;
 
@@ -138,6 +157,8 @@ public sealed class GameSession : IDisposable {
         await CancelTurnAsync();
 
         Bot = bot;
+        JevError = null;
+        LastJevDecision = null;
         PlayerColor = playerColor;
         TimeControl = timeControl;
         BoardFlipped = playerColor == Color.Black;
@@ -302,8 +323,18 @@ public sealed class GameSession : IDisposable {
         CancellationToken token = _turn.Token;
         BotMove choice;
         try {
-            choice = await _bot.ChooseMoveAsync(Game.Position, OnSearchProgress, token);
+            choice = ReferenceEquals(Bot, JevOpponent.Profile)
+                ? await ChooseJevMoveAsync(token)
+                : await _bot.ChooseMoveAsync(Game.Position, OnSearchProgress, token);
         } catch (OperationCanceledException) {
+            return;
+        } catch (Exception ex) when (ReferenceEquals(Bot, JevOpponent.Profile)) {
+            if (token.IsCancellationRequested) return;
+            JevError = ex is HttpRequestException
+                ? "Jev request failed. Check the local host and API key, then retry."
+                : "Jev returned an invalid move. You can retry this turn.";
+            State = SessionState.BotError;
+            Notify();
             return;
         }
 
@@ -336,6 +367,36 @@ public sealed class GameSession : IDisposable {
 
         await TryPlayPremoveAsync();
     }
+
+    public async Task RetryJevTurnAsync() {
+        if (State != SessionState.BotError || !ReferenceEquals(Bot, JevOpponent.Profile)) return;
+        JevError = null;
+        await RunBotTurnAsync();
+    }
+
+    private async Task<BotMove> ChooseJevMoveAsync(CancellationToken token) {
+        using HttpResponseMessage response = await _http.PostAsJsonAsync("api/jev/move",
+            new { fen = Game.Position.ToFen() }, token);
+        response.EnsureSuccessStatusCode();
+        JevMoveResponse? result = await response.Content.ReadFromJsonAsync<JevMoveResponse>(token);
+        if (result?.Uci is null) throw new InvalidDataException("Missing move from Jev.");
+        MoveList legal = Game.Position.LegalMoves();
+        for (int i = 0; i < legal.Count; i++) {
+            if (legal[i].ToUci() == result.Uci) {
+                LastJevDecision = new JevDecisionStats(result.Uci, result.Confidence,
+                    result.ElapsedMilliseconds, result.InputTokens, result.OutputTokens);
+                return BotMove.None with { Move = legal[i], ElapsedMilliseconds = result.ElapsedMilliseconds };
+            }
+        }
+        throw new InvalidDataException("Jev returned an illegal move.");
+    }
+
+    private sealed record JevStatus(bool Available);
+    private sealed record JevMoveResponse(string Uci, double Confidence, int ElapsedMilliseconds,
+        int InputTokens, int OutputTokens);
+
+    public sealed record JevDecisionStats(string Uci, double Confidence, int ElapsedMilliseconds,
+        int InputTokens, int OutputTokens);
 
     private void OnSearchProgress(SearchProgress progress) {
         Telemetry = progress;
