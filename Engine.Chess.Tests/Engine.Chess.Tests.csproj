@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Engine.Chess\Engine.Chess.csproj" />
+    <ProjectReference Include="..\Engine.Jev.Host\Engine.Jev.Host.csproj" />
   </ItemGroup>
 
   <ItemGroup>

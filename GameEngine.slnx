@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Engine.Chess/Engine.Chess.csproj" />
   <Project Path="Engine.Chess.Tests/Engine.Chess.Tests.csproj" />
+  <Project Path="Engine.Jev.Host/Engine.Jev.Host.csproj" />
   <Project Path="Engine.UI/Engine.UI.csproj" />
 </Solution>

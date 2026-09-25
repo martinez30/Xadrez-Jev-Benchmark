@@ -36,7 +36,7 @@
 
 <main class="app-body">
     <div class="board-column">
-        <PlayerBar Name="@Opponent.Name" Rating="Opponent.Elo" Initials="@Opponent.Initials"
+        <PlayerBar Name="@Opponent.Name" Rating="@(ReferenceEquals(Opponent, JevOpponent.Profile) ? null : Opponent.Elo)" Initials="@Opponent.Initials"
                    Accent="@Opponent.Accent" Captured="Session.Game.CapturedBy(BotColor)"
                    CapturedColor="Session.PlayerColor" MaterialLead="MaterialLead(BotColor)"
                    IsThinking="Session.State == SessionState.BotThinking"
@@ -73,6 +73,10 @@
                    ShowClock="!Session.TimeControl.IsUnlimited" Clock="ClockFor(Session.PlayerColor)" />
 
         <div class="board-controls">
+            @if (Session.State == SessionState.BotError) {
+                <span role="alert">@Session.JevError</span>
+                <button class="btn" @onclick="Session.RetryJevTurnAsync">Retry Jev</button>
+            }
             <button class="btn" disabled="@(!Session.CanMove || Session.IsFindingHint)"
                     @onclick="Session.ShowHintAsync">
                 @(Session.IsFindingHint ? "Thinking" : "Hint")
@@ -106,11 +110,17 @@
         <EngineTelemetry Progress="Session.Telemetry"
                          IsThinking="Session.State == SessionState.BotThinking"
                          Line="@TelemetryLine" />
+        @if (ReferenceEquals(Opponent, JevOpponent.Profile) && Session.LastJevDecision is { } decision) {
+            <div class="panel telemetry" aria-label="Last Jev decision">
+                <span class="eyebrow">Last Jev decision</span>
+                <p>@decision.Uci · @decision.Confidence.ToString("P0") confidence · @decision.ElapsedMilliseconds ms · @decision.InputTokens input tokens</p>
+            </div>
+        }
     </div>
 </main>
 
 @if (_showPicker) {
-    <OpponentPicker InitialBot="Session.Bot" InitialColor="Session.PlayerColor"
+    <OpponentPicker InitialBot="Session.Bot" InitialColor="Session.PlayerColor" JevAvailable="Session.JevAvailable"
                     InitialTimeControl="Session.TimeControl" CanCancel="true"
                     OnStart="StartGame" OnCancel="() => _showPicker = false" />
 }
@@ -140,6 +150,8 @@
         Session.SoundRequested += OnSoundRequested;
         _ = RunClockAsync();
     }
+
+    protected override async Task OnInitializedAsync() => await Session.RefreshJevAvailabilityAsync();
 
     private void OnSessionChanged() {
         // Clearing the selection keeps a highlight from surviving a move the session

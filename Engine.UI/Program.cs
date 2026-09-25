@@ -12,6 +12,7 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 // One session per tab: it owns the game, the bot and the analysis engine.
 builder.Services.AddSingleton<GameSession>();
 builder.Services.AddScoped<SoundPlayer>();
+builder.Services.AddSingleton(new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 
 // Building the attack tables costs a few milliseconds. Doing it during startup
 // keeps it off the first move the player makes.
